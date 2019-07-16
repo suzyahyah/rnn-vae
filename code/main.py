@@ -7,21 +7,16 @@ import os
 import pdb
 import vis
 import logging
+import logger_utils
 
 np.random.seed(0)
 num_epochs=50
 SAVE_PATH="models/rnn-vae"
-LOG_PATH="logs/errors"
 batch_size=25
 nwords=10000
 
-logger = logging.getLogger("rnn-vae")
-logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler("logs/errors.log")
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-logger.addHandler(fh)
-
+log_train = logger_utils.get_nn_logger(mode="train")
+log_valid = logger_utils.get_nn_logger(mode="valid")
 
 if __name__=="__main__":
 
@@ -65,9 +60,13 @@ if __name__=="__main__":
                 vis.input_reconstruct(model, x_len[0:5], x[0:5], train_dataset.ix2w)
                 vis.train_reconstruct(x_len[0:5], x[0:5], x_recon[0:5], train_dataset.ix2w)
 
-        logger.info("\nepoch:{}".format(epoch))
-        out = "--TRAIN-- running_loss:{:.3f}, kld:{:.3f}, bce:{:.3f}".format(running_loss, r_kldloss, r_bceloss)
-        logger.info(out)
+        #logger.info("\nepoch:{}".format(epoch))
+        print("--TRAIN--")
+        #out = running_loss:{:.3f}, kld:{:.3f}, bce:{:.3f}".format(running_loss, r_kldloss, r_bceloss)
+#        print("EPOCH\trunning_loss:\tr_kldloss:\tr_bceloss")
+        out = "{}\t{:.3f}\t{:.3f}\t{:.3f}".format(epoch, running_loss, r_kldloss, r_bceloss)
+        log_train.info(out)
+
         model.eval()
         running_loss = 0.0
         r_bceloss = 0.0
@@ -84,9 +83,9 @@ if __name__=="__main__":
             r_kldloss += (kld/batch_size).item()
             r_bceloss += (bce/batch_size).item()
 
-        out = "--VALID-- running_loss:{:.3f}, kld:{:.3f}, bce:{:.3f}".format(running_loss, r_kldloss, r_bceloss)
-        logger.info(out)
-
+        print("--VALID--")
+        out = "{}\t{:.3f}\t{:.3f}\t{:.3f}".format(epoch, running_loss, r_kldloss, r_bceloss)
+        log_valid.info(out)
 
         if epoch%10==0 and epoch!=0:
             SAVEDTO = os.path.join(SAVE_PATH+"-{}.pt".format(str(epoch)))
