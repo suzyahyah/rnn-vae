@@ -115,12 +115,10 @@ class RNNDecoder(nn.Module):
 
             output = output0
             while (len(decoded)<20):
-
-                outputx = embedding(torch.LongTensor([output]))
-                output, hidden = self.gru(outputx.unsqueeze(0), hidden)
+                inputx = embedding(torch.LongTensor([output]))
+                output, hidden = self.gru(inputx.unsqueeze(0), hidden)
                 output = torch.argmax(F.softmax(self.fc_out(output).squeeze(), dim=0)).item()
                 decoded.append(output)
-
             all_decoded.append(decoded)
         return all_decoded
 
