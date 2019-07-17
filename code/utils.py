@@ -5,9 +5,10 @@ import torch
 import pdb
 
 class TextDataset(Dataset):
-    def __init__(self, fn="", model="vae", nwords=5000):
+    def __init__(self, fn="", model="vae", nwords=5000, max_seq_len=10):
         self.nwords = nwords
         self.model = model
+        self.max_seq_len = max_seq_len
 
         self.w2ix = {'<pad>':0, '<unk>':1, '<SOS>':2, '<EOS>': 3, 'N':4}
         self.ix2w = {v:k for k, v in self.w2ix.items()}
@@ -21,7 +22,8 @@ class TextDataset(Dataset):
     def __getitem__(self, ix):
         # this needs to be modified depending on the input output of the model
         sent = self.data[ix]
-        sent = [self.w2ix[w] if w in self.w2ix else self.w2ix['<unk>'] for w in sent.split()]
+        sent = sent.split()[:self.max_seq_len] # limit the length of sentences
+        sent = [self.w2ix[w] if w in self.w2ix else self.w2ix['<unk>'] for w in sent]
 
         if self.model=="vae":
             train_seq = sent
@@ -48,6 +50,7 @@ class TextDataset(Dataset):
     def make_ix_dicts(self, all_words):
 
         c_all_words = Counter(all_words)
+
         if len(c_all_words) > (self.nwords-5):
             vocab_words = c_all_words.most_common((self.nwords-5))
         else:

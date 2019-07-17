@@ -5,26 +5,32 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 class RNNVAE(nn.Module):
-    def __init__(self, z_dim=20, hidden_dim=100, nwords=5000, embedding_dim=300):
+    def __init__(self, z_dim=20, hidden_dim=100, nwords=5000, embedding_dim=300, variational=0, device='cpu'):
         super(RNNVAE,self).__init__()
         self.embedding = nn.Embedding(nwords, embedding_dim)
         self.nwords = nwords
-        self.encoder = RNNEncoder(z_dim, hidden_dim)
-        self.decoder = RNNDecoder(z_dim, hidden_dim, nwords=nwords)
+        self.encoder = RNNEncoder(z_dim, hidden_dim, device=device)
+        self.decoder = RNNDecoder(z_dim, hidden_dim, nwords=nwords, device=device)
         self.z_dim = z_dim
+        self.device = device
+        self.variational = variational
 
     def sample_z_reparam(self, q_mu, q_logvar):
         eps = torch.randn_like(q_logvar)
         z = q_mu + torch.exp(q_logvar*0.5) * eps
-        return z
+        return z.to(self.device)
 
     def forward(self, x_lengths, x_padded, eos_seq):
 
         embed = self.embedding(x_padded)
         q_mu, q_logvar = self.encoder(embed, x_lengths)
-        z = self.sample_z_reparam(q_mu, q_logvar)
+
+        if self.variational==1:
+            z = self.sample_z_reparam(q_mu, q_logvar)
+        else:
+            z = q_mu
         
-        eos_seq = self.embedding(torch.stack(eos_seq))
+        eos_seq = self.embedding(eos_seq)
         eos_embed_seq = torch.cat((eos_seq, embed), dim=1)
         x_lengths = [(x+1) for x in x_lengths]
 
@@ -54,7 +60,8 @@ class RNNEncoder(nn.Module):
     def __init__(self, z_dim=20, 
                         hidden_dim=100, 
                         n_layers=1, 
-                        embedding_dim=300):
+                        embedding_dim=300,
+                        device='cpu'):
         super(RNNEncoder, self).__init__()
 
         self.n_layers = n_layers
@@ -80,7 +87,8 @@ class RNNDecoder(nn.Module):
                         hidden_dim=100,
                         embedding_dim=300,
                         n_layers=1,
-                        nwords=5000):
+                        nwords=5000,
+                        device='cpu'):
 
         super(RNNDecoder, self).__init__()
         self.fc_z_h = nn.Linear(z_dim, hidden_dim)
@@ -89,6 +97,8 @@ class RNNDecoder(nn.Module):
         self.grucell = nn.GRUCell(embedding_dim, hidden_dim)
         self.gru = nn.GRU(embedding_dim, hidden_dim, n_layers, batch_first=True)
         self.fc_out = nn.Linear(hidden_dim, nwords)
+
+        self.device = device
 
     def forward(self, x_length, embed, z):
 
@@ -104,6 +114,7 @@ class RNNDecoder(nn.Module):
 
     def rollout_decode(self, input0, z, embedding):
         all_decoded = []
+        z = z.to(self.device)
         hiddens = self.fc_z_h(z)
 
         for i in range(z.size(0)):
@@ -116,7 +127,7 @@ class RNNDecoder(nn.Module):
             output = output0
             while (len(decoded)<20):
 
-                outputx = embedding(torch.LongTensor([output]))
+                outputx = embedding(torch.LongTensor([output]).to(self.device))
                 output, hidden = self.gru(outputx.unsqueeze(0), hidden)
                 output = torch.argmax(F.softmax(self.fc_out(output).squeeze(), dim=0)).item()
                 decoded.append(output)

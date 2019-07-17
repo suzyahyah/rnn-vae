@@ -3,12 +3,16 @@
 
 import logging
 
-def get_nn_logger(mode="train"):
+def get_nn_logger(mode="train", variational=1):
     
-    logger = logging.getLogger("rnn-vae-{}".format(mode))
+    logger = logging.getLogger("rnn-{}".format(mode))
     logger.setLevel(logging.DEBUG)
 
-    fh = logging.FileHandler("logs/{}_error.log".format(mode))
+    if variational==1:
+        fh = logging.FileHandler("logs/vae/{}_error.log".format(mode))
+    else:
+        fh = logging.FileHandler("logs/rnn/{}_error.log".format(mode))
+
     formatter = logging.Formatter('%(message)s')
     fh.setFormatter(formatter)
 
