@@ -7,10 +7,12 @@ declare -A M
 M=(
 ["CUDA"]=`free-gpu`
 ["NUM_EPOCHS"]=500
-["BATCH_SIZE"]=32
-["NWORDS"]=10000
+["NWORDS"]=20000
 ["L_EPOCH"]=0
-["VARIATIONAL"]=1
+["VARIATIONAL"]=$1
+["HIDDEN_DIM"]=512
+["LATENT_DIM"]=$2
+["BATCH_SIZE"]=$3
 )
 echo "CUDA device:", ${M[CUDA]}
 export CUDA_VISIBILE_DEVICES=${M[CUDA]}

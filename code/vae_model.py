@@ -5,13 +5,14 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 class RNNVAE(nn.Module):
-    def __init__(self, z_dim=20, hidden_dim=100, nwords=5000, embedding_dim=300, variational=0, device='cpu'):
+    def __init__(self, z_dim=20, h_dim=100, nwords=5000, embedding_dim=300, variational=0, device='cpu'):
         super(RNNVAE,self).__init__()
         self.embedding = nn.Embedding(nwords, embedding_dim)
         self.nwords = nwords
-        self.encoder = RNNEncoder(z_dim, hidden_dim, device=device)
-        self.decoder = RNNDecoder(z_dim, hidden_dim, nwords=nwords, device=device)
+        self.encoder = RNNEncoder(z_dim=z_dim, h_dim=h_dim, device=device)
+        self.decoder = RNNDecoder(z_dim=z_dim, h_dim=h_dim, nwords=nwords, device=device)
         self.z_dim = z_dim
+        self.h_dim = h_dim
         self.device = device
         self.variational = variational
 
@@ -38,17 +39,18 @@ class RNNVAE(nn.Module):
 
         return x_recon, q_mu, q_logvar
 
-    def loss_fn(self, y, x_recon, q_mu, q_logvar, x_lengths):
+    def loss_fn(self, y, x_recon, q_mu, q_logvar):
 
         batch_ce_loss = 0.0
         for i in range(y.size(0)):
             # for each sentence
-            x_len = x_lengths[i]+1 # becof of EOS
-            ce_loss = F.cross_entropy(x_recon[i][:x_len], y[i][:x_len], reduction="sum")
+            #x_len = x_lengths[i]+1 # becof of EOS
+            #pdb.set_trace()
+            #ce_loss = F.cross_entropy(x_recon[i][:x_len], y[i][:x_len], reduction="sum")
+            ce_loss = F.cross_entropy(x_recon[i], y[i], reduction="sum")
             # should this be mean?
             #ce_loss = ce_loss/(x_len[i]+1) # normalize average word loss
-
-        batch_ce_loss += ce_loss
+            batch_ce_loss += ce_loss
 
         # check this?
         kld = -0.5 * torch.sum(1 + q_logvar - q_mu.pow(2) - q_logvar.exp())
@@ -58,24 +60,24 @@ class RNNVAE(nn.Module):
 
 class RNNEncoder(nn.Module):
     def __init__(self, z_dim=20, 
-                        hidden_dim=100, 
+                        h_dim=100, 
                         n_layers=1, 
                         embedding_dim=300,
                         device='cpu'):
         super(RNNEncoder, self).__init__()
 
         self.n_layers = n_layers
-        self.hidden_dim = hidden_dim
+        self.h_dim = h_dim
         self.z_dim = z_dim
 
-        self.gru = nn.GRU(embedding_dim, hidden_dim, n_layers, batch_first=True)
-        self.fc_mu = nn.Linear(hidden_dim, z_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, z_dim)
+        self.gru = nn.GRU(embedding_dim, h_dim, n_layers, batch_first=True)
+        self.fc_mu = nn.Linear(h_dim, z_dim)
+        self.fc_logvar = nn.Linear(h_dim, z_dim)
 
     def forward(self, embed, x_lengths, hidden=None):
         packed = pack_padded_sequence(embed, x_lengths, batch_first=True)
         output_packed, last_hidden = self.gru(packed, hidden)
-        #last_hidden = last_hidden.view(5, self.hidden_dim)
+        #last_hidden = last_hidden.view(5, self.h_dim)
         q_mu = self.fc_mu(last_hidden)
         q_logvar = self.fc_logvar(last_hidden)
 
@@ -84,19 +86,19 @@ class RNNEncoder(nn.Module):
 
 class RNNDecoder(nn.Module):
     def __init__(self, z_dim=20,
-                        hidden_dim=100,
+                        h_dim=100,
                         embedding_dim=300,
                         n_layers=1,
                         nwords=5000,
                         device='cpu'):
 
         super(RNNDecoder, self).__init__()
-        self.fc_z_h = nn.Linear(z_dim, hidden_dim)
-        self.hidden_dim = hidden_dim
+        self.fc_z_h = nn.Linear(z_dim, h_dim)
+        self.h_dim = h_dim
 
-        self.grucell = nn.GRUCell(embedding_dim, hidden_dim)
-        self.gru = nn.GRU(embedding_dim, hidden_dim, n_layers, batch_first=True)
-        self.fc_out = nn.Linear(hidden_dim, nwords)
+        self.grucell = nn.GRUCell(embedding_dim, h_dim)
+        self.gru = nn.GRU(embedding_dim, h_dim, n_layers, batch_first=True)
+        self.fc_out = nn.Linear(h_dim, nwords)
 
         self.device = device
 
@@ -120,7 +122,7 @@ class RNNDecoder(nn.Module):
         for i in range(z.size(0)):
             decoded = []            
 
-            output0, hidden = self.gru(input0.unsqueeze(0), hiddens[i].view(1, 1, self.hidden_dim))
+            output0, hidden = self.gru(input0.unsqueeze(0), hiddens[i].view(1, 1, self.h_dim))
             output0 = torch.argmax(F.softmax(self.fc_out(output0).squeeze(), dim=0)).item()
             decoded.append(output0)
 
