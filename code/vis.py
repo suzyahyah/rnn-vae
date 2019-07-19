@@ -44,7 +44,7 @@ def input_reconstruct(logger1, model, x_lengths, x_padded, input0, ix2w, device)
         embed = model.embedding(x_padded)
         q_mu, q_logvar = model.encoder(embed, x_lengths)
 
-        if model.variational==1:
+        if model.framework=="vae":
             z = model.sample_z_reparam(q_mu, q_logvar).squeeze()
         else:
             z = q_mu.squeeze()

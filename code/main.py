@@ -11,24 +11,21 @@ import logger_utils
 import argparse
 
 argparser = argparse.ArgumentParser()
-argparser.add_argument('--cuda', dest='cuda', type=str)
+argparser.add_argument('--cuda', dest='cuda', type=str, default="-1")
 argparser.add_argument('--num_epochs', dest='num_epochs', type=int)
 argparser.add_argument('--batch_size', dest='batch_size', type=int)
 argparser.add_argument('--nwords', dest='nwords', type=int)
 argparser.add_argument('--l_epoch', dest='l_epoch', type=int)
-argparser.add_argument('--variational', dest='variational', type=int)
+argparser.add_argument('--framework', dest='framework', type=str)
 argparser.add_argument('--hidden_dim', dest='h_dim', type=int)
 argparser.add_argument('--latent_dim', dest='z_dim', type=int)
+argparser.add_argument('--rnngate', dest='rnngate', type=str)
 
 args = argparser.parse_args()
 
 np.random.seed(0)
-if args.variational==1:
-    fol = "rnn"
-else:
-    fol = "vae"
 
-SAVE_PATH="models/{}/z{}-h{}-bs{}/model".format(fol, args.z_dim, args.h_dim, args.batch_size)
+SAVE_PATH="models/{}/z{}-h{}-bs{}/model".format(args.framework, args.z_dim, args.h_dim, args.batch_size)
 
 
 log_train = logger_utils.get_nn_logger(mode="train", args=args)
@@ -50,9 +47,10 @@ if __name__=="__main__":
     valid_dataloader = utils.get_dataloader(valid_dataset, batch_size=args.batch_size)
 
     model = vae_model.RNNVAE(nwords=train_dataset.vocab_size, 
-                                variational=args.variational, 
+                                framework=args.framework, 
                                 z_dim=args.z_dim,
                                 h_dim=args.h_dim,
+                                rnngate=args.rnngate,
                                 device=device)
     try:
         model.load_state_dict(torch.load(os.path.join(SAVE_PATH+"-{}.pt".format(str(args.l_epoch))),map_location=device))

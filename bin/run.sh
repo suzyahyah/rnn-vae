@@ -5,11 +5,12 @@ source activate rnn-vae
 declare -A M
 
 M=(
-["CUDA"]=`free-gpu`
+#["CUDA"]=`free-gpu`
 ["NUM_EPOCHS"]=500
 ["NWORDS"]=20000
 ["L_EPOCH"]=0
-["VARIATIONAL"]=$1
+["RNNGATE"]=gru
+["FRAMEWORK"]=$1
 ["HIDDEN_DIM"]=512
 ["LATENT_DIM"]=$2
 ["BATCH_SIZE"]=$3
