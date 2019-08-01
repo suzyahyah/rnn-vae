@@ -25,7 +25,10 @@ args = argparser.parse_args()
 
 np.random.seed(0)
 
-SAVE_PATH="models/{}/z{}-h{}-bs{}/model".format(args.framework, args.z_dim, args.h_dim, args.batch_size)
+fol = "models/{}".format(args.framework)
+if not os.path.isdir(fol):
+    os.mkdir(fol)
+SAVE_PATH="{}/z{}-h{}-bs{}/model".format(fol, args.z_dim, args.h_dim, args.batch_size)
 
 
 log_train = logger_utils.get_nn_logger(mode="train", args=args)
@@ -38,11 +41,11 @@ print("device:", device)
 
 if __name__=="__main__":
 
-    train_dataset = utils.TextDataset(fn="data/ptb.train.txt", nwords=args.nwords)
+    train_dataset = utils.TextDataset(fn="../cmv/data/all/train_y.txt", nwords=args.nwords)
     train_dataset.make_ix_dicts(train_dataset.all_words)
     train_dataloader = utils.get_dataloader(train_dataset, batch_size=args.batch_size)
 
-    valid_dataset = utils.TextDataset(fn="data/ptb.valid.txt", nwords=args.nwords)
+    valid_dataset = utils.TextDataset(fn="../cmv/data/all/test_y.txt", nwords=args.nwords)
     valid_dataset.make_ix_dicts(valid_dataset.all_words)
     valid_dataloader = utils.get_dataloader(valid_dataset, batch_size=args.batch_size)
 

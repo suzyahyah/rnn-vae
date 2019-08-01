@@ -5,15 +5,16 @@ source activate rnn-vae
 declare -A M
 
 M=(
-#["CUDA"]=`free-gpu`
+["CUDA"]=`free-gpu`
 ["NUM_EPOCHS"]=500
-["NWORDS"]=20000
+["NWORDS"]=10000
 ["L_EPOCH"]=0
 ["RNNGATE"]=gru
-["FRAMEWORK"]=$1
+["FRAMEWORK"]=vae
 ["HIDDEN_DIM"]=512
-["LATENT_DIM"]=$2
-["BATCH_SIZE"]=$3
+["LATENT_DIM"]=100
+["BATCH_SIZE"]=32
+["WORD_DROPOUT"]=0.3
 )
 echo "CUDA device:", ${M[CUDA]}
 export CUDA_VISIBILE_DEVICES=${M[CUDA]}

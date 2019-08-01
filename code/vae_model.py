@@ -118,7 +118,7 @@ class RNNDecoder(nn.Module):
         
         packed = pack_padded_sequence(embed, x_length, batch_first=True)
         if self.rnngate=="lstm":
-            ccell = torch.randn(hidden.size())
+            ccell = torch.randn(hidden.size()).to(self.device)
             outputs, _ = self.nn(packed, (hidden, ccell ))
         else:
             outputs, _ = self.nn(packed, hidden)
@@ -140,8 +140,9 @@ class RNNDecoder(nn.Module):
             if self.rnngate=="gru":
                 output0, hidden = self.nn(input0.unsqueeze(0), hiddens[i].view(1, 1, self.h_dim))
             else:
+                ccell = torch.randn(hiddens[i].view(1, 1, self.h_dim).size()).to(self.device)
                 output0, (hidden, cell) = self.nn(input0.unsqueeze(0), (hiddens[i].view(1, 1,
-                    self.h_dim), None))
+                    self.h_dim), ccell))
             output0 = torch.argmax(F.softmax(self.fc_out(output0).squeeze(), dim=0)).item()
             decoded.append(output0)
 
