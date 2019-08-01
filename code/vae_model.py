@@ -4,14 +4,20 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+torch.manual_seed(0)
+
 class RNNVAE(nn.Module):
-    def __init__(self, z_dim=20, h_dim=100, nwords=5000, embedding_dim=300, framework="vae",
+    def __init__(self, z_dim=20, h_dim=100, nwords=5000, e_dim=300, framework="vae",
             rnngate="lstm", device='cpu'):
         super(RNNVAE,self).__init__()
-        self.embedding = nn.Embedding(nwords, embedding_dim)
+        self.embedding = nn.Embedding(nwords, e_dim, padding_idx=0)
         self.nwords = nwords
-        self.encoder = RNNEncoder(z_dim=z_dim, h_dim=h_dim, rnngate=rnngate, device=device)
-        self.decoder = RNNDecoder(z_dim=z_dim, h_dim=h_dim, nwords=nwords, rnngate=rnngate, device=device)
+        self.encoder = RNNEncoder(z_dim=z_dim, 
+                                    h_dim=h_dim, 
+                                    e_dim=e_dim, rnngate=rnngate, device=device)
+        self.decoder = RNNDecoder(z_dim=z_dim, 
+                                    h_dim=h_dim, 
+                                    e_dim=e_dim, nwords=nwords, rnngate=rnngate, device=device)
         self.z_dim = z_dim
         self.h_dim = h_dim
         self.device = device
@@ -23,21 +29,18 @@ class RNNVAE(nn.Module):
         z = q_mu + torch.exp(q_logvar*0.5) * eps
         return z.to(self.device)
 
-    def forward(self, x_lengths, x_padded, eos_seq):
+    def forward(self, xx, x_lens, ey, y_lens):
 
-        embed = self.embedding(x_padded)
-        q_mu, q_logvar = self.encoder(embed, x_lengths)
+        embed = self.embedding(xx)
+        q_mu, q_logvar = self.encoder(embed, x_lens)
 
         if self.framework=="vae":
             z = self.sample_z_reparam(q_mu, q_logvar)
         else:
             z = q_mu
         
-        eos_seq = self.embedding(eos_seq)
-        eos_embed_seq = torch.cat((eos_seq, embed), dim=1)
-        x_lengths = [(x+1) for x in x_lengths]
-
-        x_recon = self.decoder(x_lengths, eos_embed_seq, z)
+        ey = self.embedding(ey)
+        x_recon = self.decoder(y_lens, ey, z)
 
         return x_recon, q_mu, q_logvar
 
@@ -45,26 +48,22 @@ class RNNVAE(nn.Module):
 
         batch_ce_loss = 0.0
         for i in range(y.size(0)):
-            # for each sentence
-            #x_len = x_lengths[i]+1 # becof of EOS
-            #pdb.set_trace()
-            #ce_loss = F.cross_entropy(x_recon[i][:x_len], y[i][:x_len], reduction="sum")
-            ce_loss = F.cross_entropy(x_recon[i], y[i], reduction="sum", ignore_index=0)
-            # should this be mean?
-            #ce_loss = ce_loss/(x_len[i]+1) # normalize average word loss
+            ce_loss = F.cross_entropy(x_recon[i], y[i], reduction="mean", ignore_index=0)
             batch_ce_loss += ce_loss
 
+        batch_ce_loss = batch_ce_loss/y.size(0)
         # check this?
         kld = -0.5 * torch.sum(1 + q_logvar - q_mu.pow(2) - q_logvar.exp())
-        return batch_ce_loss, kld
+        kld = kld/y.size(0)
 
+        return batch_ce_loss, kld
 
 
 class RNNEncoder(nn.Module):
     def __init__(self, z_dim=20, 
                         h_dim=100, 
                         n_layers=1, 
-                        embedding_dim=300,
+                        e_dim=300,
                         rnngate="lstm",
                         device='cpu'):
         super(RNNEncoder, self).__init__()
@@ -72,8 +71,7 @@ class RNNEncoder(nn.Module):
         self.n_layers = n_layers
         self.h_dim = h_dim
         self.z_dim = z_dim
-        self.rnn = getattr(nn, rnngate.upper())(embedding_dim, h_dim, n_layers,
-                batch_first=True)
+        self.rnn = getattr(nn, rnngate.upper())(e_dim, h_dim, n_layers, batch_first=True)
 
         self.rnngate = rnngate
         #self.gru = nn.GRU(embedding_dim, h_dim, n_layers, batch_first=True)
@@ -81,7 +79,8 @@ class RNNEncoder(nn.Module):
         self.fc_logvar = nn.Linear(h_dim, z_dim)
 
     def forward(self, embed, x_lengths, hidden=None):
-        packed = pack_padded_sequence(embed, x_lengths, batch_first=True)
+        packed = pack_padded_sequence(embed, x_lengths, batch_first=True, enforce_sorted=False)
+
         if self.rnngate=="lstm":
             output_packed, (last_hidden, cell) = self.rnn(packed, hidden)
         else:
@@ -96,7 +95,7 @@ class RNNEncoder(nn.Module):
 class RNNDecoder(nn.Module):
     def __init__(self, z_dim=20,
                         h_dim=100,
-                        embedding_dim=300,
+                        e_dim=300,
                         n_layers=1,
                         nwords=5000,
                         rnngate="lstm",
@@ -105,25 +104,25 @@ class RNNDecoder(nn.Module):
         super(RNNDecoder, self).__init__()
         self.fc_z_h = nn.Linear(z_dim, h_dim)
         self.h_dim = h_dim
-        self.nn = getattr(nn, rnngate.upper())(embedding_dim, h_dim, n_layers,
-                batch_first=True)
+        self.nn = getattr(nn, rnngate.upper())(e_dim, h_dim, n_layers, batch_first=True)
         self.fc_out = nn.Linear(h_dim, nwords)
         self.rnngate = rnngate
-
         self.device = device
 
-    def forward(self, x_length, embed, z):
+    def forward(self, y_length, embed, z):
 
         hidden = self.fc_z_h(z)
+        ccell = torch.randn_like(hidden)
         
-        packed = pack_padded_sequence(embed, x_length, batch_first=True)
+        packed = pack_padded_sequence(embed, y_length, batch_first=True, enforce_sorted=False)
+
         if self.rnngate=="lstm":
-            ccell = torch.randn(hidden.size()).to(self.device)
             outputs, _ = self.nn(packed, (hidden, ccell ))
         else:
             outputs, _ = self.nn(packed, hidden)
 
-        outputs, x_length = pad_packed_sequence(outputs, batch_first=True)
+        outputs, y_length = pad_packed_sequence(outputs, batch_first=True,
+                total_length=max(y_length))
         outputs = self.fc_out(outputs)
 
        #outputs = F.logsoftmax(self.fc_out(outputs))
@@ -140,9 +139,11 @@ class RNNDecoder(nn.Module):
             if self.rnngate=="gru":
                 output0, hidden = self.nn(input0.unsqueeze(0), hiddens[i].view(1, 1, self.h_dim))
             else:
-                ccell = torch.randn(hiddens[i].view(1, 1, self.h_dim).size()).to(self.device)
-                output0, (hidden, cell) = self.nn(input0.unsqueeze(0), (hiddens[i].view(1, 1,
-                    self.h_dim), ccell))
+                first_hidden = hiddens[i].view(1, 1, self.h_dim).to(self.device)
+                ccell = torch.tanh(first_hidden).to(self.device)
+                ccell = torch.randn(first_hidden.size()).to(self.device)
+                output0, (hidden, cell) = self.nn(input0.unsqueeze(0), (first_hidden, ccell))
+
             output0 = torch.argmax(F.softmax(self.fc_out(output0).squeeze(), dim=0)).item()
             decoded.append(output0)
 
