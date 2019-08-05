@@ -11,6 +11,7 @@ import logging
 import logger_utils
 import argparse
 from distutils.util import strtobool
+import sys
 
 torch.manual_seed(0)
 np.random.seed(0)
@@ -37,6 +38,7 @@ argparser.add_argument('--n_layers', dest='n_layers', type=int)
 argparser.add_argument('--max_seq_len', dest='max_seq_len', type=int, default=25)
 argparser.add_argument('--delta_weight', type=lambda x: bool(strtobool(x)), default=False)
 argparser.add_argument('--universal_embed', type=lambda x: bool(strtobool(x)), default=False)
+argparser.add_argument('--bow', type=lambda x: bool(strtobool(x)), default=False)
 argparser.add_argument('--z_combine', type=str)
 argparser.add_argument('--word_dropout', type=float, default=0.0)
 argparser.add_argument('--scale_pzvar', type=float, default=1.0)
@@ -44,21 +46,11 @@ argparser.add_argument('--kl_anneal_steps', type=int, default=0)
 
 args = argparser.parse_args()
 
-SAVE_DIR="models/{}-{}/z{}-h{}-wd{}".format(args.framework, 
-                                            args.rnngate, 
-                                            args.z_dim, 
-                                            args.h_dim, 
-                                            args.word_dropout)
-
-SAVE_PATH = os.path.join(SAVE_DIR, "model")
-
-if not os.path.exists(SAVE_DIR):
-    os.makedirs(SAVE_DIR)
-
+SAVE_PATH = logger_utils.get_save_dir(args)
 
 log_train = logger_utils.get_nn_logger(mode="train", args=args)
 log_valid = logger_utils.get_nn_logger(mode="valid", args=args)
-log_sample = logger_utils.get_sample_logger(args)
+log_sample = logger_utils.get_sample_logger(mode="train", args=args)
 
 device = torch.device("cuda:{}".format(args.cuda) if int(args.cuda)>=0 else "cpu")
 print("device:", device)
@@ -79,6 +71,8 @@ if __name__=="__main__":
     valid_dataset.w2ix = train_dataset.w2ix
     valid_dataset.ix2w = train_dataset.ix2w
     valid_dataset.vocab_size = train_dataset.vocab_size
+
+    valid_dataset.proc_data()
     valid_dataloader = utils.get_dataloader(valid_dataset, batch_size=args.batch_size)
 
     model = vae_model.RNNVAE(nwords=train_dataset.vocab_size, 
@@ -87,7 +81,8 @@ if __name__=="__main__":
                                 h_dim=args.h_dim,
                                 e_dim=args.e_dim,
                                 rnngate=args.rnngate,
-                                device=device)
+                                device=device,
+                                scale_pzvar=args.scale_pzvar)
 
     try:
         model.load_state_dict(torch.load(os.path.join(SAVE_PATH+"-{}.pt".format(str(args.l_epoch))),map_location=device))
@@ -104,26 +99,33 @@ if __name__=="__main__":
 
     steps = 0
 
+    epoch_valid_loss = []
     for epoch in range(start_e, end_e):
         print("epoch:", epoch)
         running_loss = []
         r_bceloss = []
         r_kldloss = []
+        if steps>args.kl_anneal_steps:
+            print("kl end")
 
         model.train()
         for i, (xx, x_lens, ey, ye, y_lens) in enumerate(train_dataloader):
             steps +=1 
             # x_recon, x doesnt start with eos
             # y ends with eos 
-            x_recon, q_mu, q_logvar = model(xx, x_lens, ey, y_lens)
+            x_recon, z, q_mu, q_logvar = model(xx, x_lens, ey, y_lens)
             bce, kld = model.loss_fn(ye, x_recon, q_mu, q_logvar)
 
             loss = bce 
-            loss += utils.anneal(kld, steps, args.kl_anneal_steps)
-            loss.backward()
+            if args.framework=="vae":
+                loss += utils.anneal(kld, steps, args.kl_anneal_steps)
+            if args.bow:
+                bow_loss = model.loss_bow(ye, z)
+                loss += bow_loss
 
-            optimizer.step()
             optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
             
             running_loss.append(loss.item())
             r_kldloss.append(kld.item())
@@ -148,14 +150,13 @@ if __name__=="__main__":
         r_bceloss = []
         r_kldloss = []
 
-
         for i, (xx, x_lens, ey, ye, y_lens) in enumerate(valid_dataloader):
             # x_recon, x doesnt start with eos
             # y ends with eos 
-            x_recon, q_mu, q_logvar = model(xx, x_len, ey, y_lens)
+            x_recon, z, q_mu, q_logvar = model(xx, x_lens, ey, y_lens)
             bce, kld = model.loss_fn(ye, x_recon, q_mu, q_logvar)
-            loss = bce + kld
-            running_loss.append(loss.item())
+            valid_loss = bce + kld
+            running_loss.append(valid_loss.item())
             r_kldloss.append(kld.item())
             r_bceloss.append(bce.item())
            
@@ -167,9 +168,17 @@ if __name__=="__main__":
         print("--VALID--" + out)
         print("Perplexity:", np.exp(np.mean(r_bceloss)))
 
-        if epoch%100==0 and epoch!=0:
+        if epoch%10==0 and epoch!=0:
             SAVEDTO = os.path.join(SAVE_PATH+"-{}.pt".format(str(epoch)))
             torch.save(model.state_dict(), SAVEDTO)
             print("saved to:", SAVEDTO)
 
 
+        epoch_valid_loss.append(np.mean(running_loss))
+        if len(epoch_valid_loss)>6:
+            if (max(epoch_valid_loss[-5:])==epoch_valid_loss[-1]):
+                print("validation falls for (5 iterations) at itr:{}".format(epoch))
+                min_epoch = np.argmin(epoch_valid_loss)
+                print("Min loss @ epoch {}:{:.3f}".format(min_epoch,
+                    epoch_valid_loss[min_epoch]))
+                sys.exit(0)

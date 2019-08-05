@@ -8,7 +8,7 @@ torch.manual_seed(0)
 
 class RNNVAE(nn.Module):
     def __init__(self, z_dim=20, h_dim=100, nwords=5000, e_dim=300, framework="vae",
-            rnngate="lstm", device='cpu'):
+            rnngate="lstm", device='cpu', scale_pzvar=1):
         super(RNNVAE,self).__init__()
         self.embedding = nn.Embedding(nwords, e_dim, padding_idx=0)
         self.nwords = nwords
@@ -23,6 +23,12 @@ class RNNVAE(nn.Module):
         self.device = device
         self.rnngate = rnngate
         self.framework = framework
+        self.scale_pzvar = scale_pzvar
+
+        self.onehot_loss = nn.BCEWithLogitsLoss()
+        self.bow_z_h = nn.Linear(z_dim, h_dim)
+        self.bow_out = nn.Linear(h_dim, nwords)
+ 
 
     def sample_z_reparam(self, q_mu, q_logvar):
         eps = torch.randn_like(q_logvar)
@@ -42,7 +48,7 @@ class RNNVAE(nn.Module):
         ey = self.embedding(ey)
         x_recon = self.decoder(y_lens, ey, z)
 
-        return x_recon, q_mu, q_logvar
+        return x_recon, z, q_mu, q_logvar
 
     def loss_fn(self, y, x_recon, q_mu, q_logvar):
 
@@ -53,10 +59,25 @@ class RNNVAE(nn.Module):
 
         batch_ce_loss = batch_ce_loss/y.size(0)
         # check this?
-        kld = -0.5 * torch.sum(1 + q_logvar - q_mu.pow(2) - q_logvar.exp())
+        scale = 1/self.scale_pzvar
+        kld = -0.5 * torch.sum(1 + q_logvar - q_mu.pow(2) - scale*q_logvar.exp())
         kld = kld/y.size(0)
 
         return batch_ce_loss, kld
+
+    def loss_bow(self, y, z):
+        predict = self.bow_out(F.relu(self.bow_z_h(z)))
+        #predict = self.decoder.fc_out(F.relu(self.decoder.fc_z_h(z)))
+        y_onehot = torch.zeros((y.size()[0], 10000)).to(self.device)
+        for j in range(y.size()[0]):
+            y_onehot[j][y[j]]=1
+
+        
+        loss = self.onehot_loss(predict.squeeze(0), y_onehot)
+        loss = loss/y.size(0)
+        #loss2 = nn.CrossEntropyLoss(predict.squeeze(0), y_onehot)
+        #pdb.set_trace()
+        return loss
 
 
 class RNNEncoder(nn.Module):
@@ -102,9 +123,9 @@ class RNNDecoder(nn.Module):
                         device='cpu'):
 
         super(RNNDecoder, self).__init__()
-        self.fc_z_h = nn.Linear(z_dim, h_dim)
         self.h_dim = h_dim
         self.nn = getattr(nn, rnngate.upper())(e_dim, h_dim, n_layers, batch_first=True)
+        self.fc_z_h = nn.Linear(z_dim, h_dim)
         self.fc_out = nn.Linear(h_dim, nwords)
         self.rnngate = rnngate
         self.device = device

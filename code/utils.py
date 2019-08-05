@@ -112,6 +112,7 @@ def collate_fn(data):
     return xx, x_lens, ey, ye, y_lens
 
 def anneal(kld, steps, anneal_steps):
+    # logistic
     if steps<anneal_steps:
-        kld = (steps/anneal_steps)*kld
+        return kld*float(1/(1+np.exp(-0.0025*(steps-anneal_steps))))
     return kld
