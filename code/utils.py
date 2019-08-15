@@ -4,6 +4,7 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 import torch
 import pdb
 import numpy as np
+from nltk.tokenize import TweetTokenizer
 
 class TextDataset(Dataset):
     def __init__(self, fn="", nwords=5000, max_seq_len=10, device="cpu", word_dropout=0.0):
@@ -27,25 +28,23 @@ class TextDataset(Dataset):
     def proc_data(self):
         
         data_ = []
+
+        tokenizer = TweetTokenizer(preserve_case=False)
         for ix in range(len(self.data)):
 
             xx = self.data[ix]
-            xx = xx.split()[:self.max_seq_len] # limit the length of sentences
+            xx = tokenizer.tokenize(xx)[:self.max_seq_len]
+        #    xx = xx.split()[:self.max_seq_len] # limit the length of sentences
             xx = [self.w2ix[w] if w in self.w2ix else self.w2ix['<unk>'] for w in xx]
             xx = torch.LongTensor(xx).to(self.device)
     
-            pad0 = torch.LongTensor([0]).to(self.device)
+            sos2 = torch.LongTensor([2]).to(self.device)
             eos3 = torch.LongTensor([3]).to(self.device)
 
+            #self.w2ix = {'<pad>':0, '<unk>':1, '<SOS>':2, '<EOS>': 3, 'N':4}
+
             ye = torch.cat((xx, eos3), dim=0)
-            ey = torch.cat((pad0, xx), dim=0)
-            
-            if self.word_dropout==0:
-                pass
-            else:
-                masks = np.random.choice(len(ye), int(len(ye)*self.word_dropout), replace=False)
-                ey[masks.tolist()] = 0 
-            
+            ey = torch.cat((sos2, xx), dim=0)
             data_.append((xx, ey, ye))
             
 
@@ -57,22 +56,32 @@ class TextDataset(Dataset):
         with open(fn, 'r') as f:
             data = f.readlines()
         
+        tokenizer = TweetTokenizer(preserve_case=False)
+        
         data = [s.strip() for s in data]
-        all_words = [w for ws in data for w in ws.split()]
+        #all_words = [w for ws in data for w in ws.split()]
+        all_words = [w for ws in data for w in tokenizer.tokenize(ws)]
+
+        #all_words = [w for ws in tokenizer.tokenize(ws) in data]
         return data, all_words
 
     def make_ix_dicts(self, all_words):
 
         c_all_words = Counter(all_words)
+        vocab_words = [w[0] for w in  c_all_words.items() if w[1]>4]
+        #c_all_words = [w[0] for w in c_all_words
 
-        if len(c_all_words) > (self.nwords-5):
-            vocab_words = c_all_words.most_common((self.nwords-5))
-        else:
-            vocab_words = list(c_all_words.keys())
+        print("all words:", len(vocab_words))
+
+        #if len(c_all_words) > (self.nwords-5):
+        #    vocab_words = c_all_words.most_common((self.nwords-5))
+        #    vocab_words = [w[0] for w in vocab_words]
+        #else:
+        #    vocab_words = list(c_all_words.keys())
 
         vl = len(self.ix2w)
-        for word in c_all_words:
-            # special case for ptb
+        for word in vocab_words:
+            # special case for pctb
             if word == "<unk>" or word == "N":
                 continue
             else:
@@ -83,7 +92,7 @@ class TextDataset(Dataset):
             if vl>=self.nwords:
                 break
 
-        print(len(self.w2ix), "words")
+        #print(len(self.w2ix), "words")
         self.vocab_size = len(self.w2ix)
 
 
@@ -111,8 +120,30 @@ def collate_fn(data):
 
     return xx, x_lens, ey, ye, y_lens
 
-def anneal(kld, steps, anneal_steps):
+def anneal(steps, anneal_steps):
     # logistic
-    if steps<anneal_steps:
-        return kld*float(1/(1+np.exp(-0.0025*(steps-anneal_steps))))
-    return kld
+    return float(1/(1+np.exp(-0.0025*(steps-anneal_steps))))
+
+
+def drop_words(ey, y_lens, word_dropout):
+
+    if word_dropout>0 and word_dropout<1:
+        for i in range(ey.size(0)):
+            prob = torch.rand(y_lens[i])
+            if ey[i][0]==2:
+                prob[0]=1 # keep sos
+            #if ey[i][y_lens[i]]==3:
+            #    prob[0]=1 # keep
+
+            v = (prob<0.4).nonzero().flatten()
+            ey[i][v] = 1  # drop 0.4 to unk
+            #pdb.set_trace()
+            #masks = np.random.choice(y_lens[i], int(y_lens[i]*word_dropout), replace=False)
+            #ey[i][masks.tolist()] = 1 # <unk>
+
+    if word_dropout==1:
+        ey = torch.zeros_like(ey)
+
+    return ey
+
+

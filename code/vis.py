@@ -29,11 +29,13 @@ def sample_reconstruct(logger1, epoch, model, input0, z, ix2w):
     logger1.info("===SAMPLE Z===")
     with torch.no_grad():
         #sample = torch.randn(64, z_dim)
-        all_decoded = model.decoder.rollout_decode(input0, z, model.embedding)
+        all_decoded, _ = model.decoder.rollout_decode(input0, z, model.embedding, 25)
         for i, decoded in enumerate(all_decoded):
             sentence = [ix2w[ix] for ix in decoded]
             logger1.info(z[i][0:8])
             logger1.info(" ".join(sentence)+"\n")
+#            if i==0:
+#                print(" ".join(sentence))
 
 
 def input_reconstruct(logger1, model, x_lengths, x_padded, input0, ix2w, device):
@@ -49,7 +51,7 @@ def input_reconstruct(logger1, model, x_lengths, x_padded, input0, ix2w, device)
         else:
             z = q_mu.squeeze()
 
-        all_decoded = model.decoder.rollout_decode(input0, z, model.embedding)
+        all_decoded,_ = model.decoder.rollout_decode(input0, z, model.embedding, 25)
 
         for j, decoded in enumerate(all_decoded):
             d_sentence = [ix2w[ix] for ix in decoded]

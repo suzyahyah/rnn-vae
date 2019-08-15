@@ -10,6 +10,7 @@ class RNNVAE(nn.Module):
     def __init__(self, z_dim=20, h_dim=100, nwords=5000, e_dim=300, framework="vae",
             rnngate="lstm", device='cpu', scale_pzvar=1):
         super(RNNVAE,self).__init__()
+        #self.embedding = nn.Embedding(nwords, e_dim, padding_idx=0)
         self.embedding = nn.Embedding(nwords, e_dim, padding_idx=0)
         self.nwords = nwords
         self.encoder = RNNEncoder(z_dim=z_dim, 
@@ -25,7 +26,7 @@ class RNNVAE(nn.Module):
         self.framework = framework
         self.scale_pzvar = scale_pzvar
 
-        self.onehot_loss = nn.BCEWithLogitsLoss()
+        self.onehot_loss = nn.BCEWithLogitsLoss(reduction="mean")
         self.bow_z_h = nn.Linear(z_dim, h_dim)
         self.bow_out = nn.Linear(h_dim, nwords)
  
@@ -50,17 +51,22 @@ class RNNVAE(nn.Module):
 
         return x_recon, z, q_mu, q_logvar
 
-    def loss_fn(self, y, x_recon, q_mu, q_logvar):
+    def loss_fn(self, y, y_lens, x_recon, q_mu, q_logvar):
 
         batch_ce_loss = 0.0
+        x_recon = x_recon.squeeze()
+        q_mu = q_mu.squeeze()
+        q_logvar = q_logvar.squeeze()
+
         for i in range(y.size(0)):
-            ce_loss = F.cross_entropy(x_recon[i], y[i], reduction="mean", ignore_index=0)
+            ce_loss = F.cross_entropy(x_recon[i], y[i], reduction="sum", ignore_index=0)
+            ce_loss = ce_loss/y_lens[i] # per word
             batch_ce_loss += ce_loss
 
         batch_ce_loss = batch_ce_loss/y.size(0)
         # check this?
         scale = 1/self.scale_pzvar
-        kld = -0.5 * torch.sum(1 + q_logvar - q_mu.pow(2) - scale*q_logvar.exp())
+        kld = -0.5 * torch.sum(1 + q_logvar - q_mu.pow(2) - q_logvar.exp())
         kld = kld/y.size(0)
 
         return batch_ce_loss, kld
@@ -68,15 +74,13 @@ class RNNVAE(nn.Module):
     def loss_bow(self, y, z):
         predict = self.bow_out(F.relu(self.bow_z_h(z)))
         #predict = self.decoder.fc_out(F.relu(self.decoder.fc_z_h(z)))
-        y_onehot = torch.zeros((y.size()[0], 10000)).to(self.device)
+        y_onehot = torch.zeros((y.size()[0], self.nwords)).to(self.device)
         for j in range(y.size()[0]):
             y_onehot[j][y[j]]=1
 
-        
+
+        #aleady averaged
         loss = self.onehot_loss(predict.squeeze(0), y_onehot)
-        loss = loss/y.size(0)
-        #loss2 = nn.CrossEntropyLoss(predict.squeeze(0), y_onehot)
-        #pdb.set_trace()
         return loss
 
 
@@ -126,19 +130,24 @@ class RNNDecoder(nn.Module):
         self.h_dim = h_dim
         self.nn = getattr(nn, rnngate.upper())(e_dim, h_dim, n_layers, batch_first=True)
         self.fc_z_h = nn.Linear(z_dim, h_dim)
+        self.fc_z_c = nn.Linear(z_dim, h_dim)
+
         self.fc_out = nn.Linear(h_dim, nwords)
         self.rnngate = rnngate
         self.device = device
+    
 
     def forward(self, y_length, embed, z):
 
         hidden = self.fc_z_h(z)
-        ccell = torch.randn_like(hidden)
+        ccell = self.fc_z_c(z)
+        #ccell = torch.randn_like(hidden)
+        #ccell = self.get_ccell(hidden)
         
         packed = pack_padded_sequence(embed, y_length, batch_first=True, enforce_sorted=False)
 
         if self.rnngate=="lstm":
-            outputs, _ = self.nn(packed, (hidden, ccell ))
+            outputs, ccell = self.nn(packed, (hidden, ccell ))
         else:
             outputs, _ = self.nn(packed, hidden)
 
@@ -149,13 +158,18 @@ class RNNDecoder(nn.Module):
        #outputs = F.logsoftmax(self.fc_out(outputs))
         return outputs
 
-    def rollout_decode(self, input0, z, embedding):
+    def rollout_decode(self, input0, z, embedding, max_length):
         all_decoded = []
+        all_decoded_score = []
+
         z = z.to(self.device)
+        z = z.squeeze()
+
         hiddens = self.fc_z_h(z)
 
         for i in range(z.size(0)):
             decoded = []            
+            decoded_score = []
             
             if self.rnngate=="gru":
                 output0, hidden = self.nn(input0.unsqueeze(0), hiddens[i].view(1, 1, self.h_dim))
@@ -165,12 +179,15 @@ class RNNDecoder(nn.Module):
                 ccell = torch.randn(first_hidden.size()).to(self.device)
                 output0, (hidden, cell) = self.nn(input0.unsqueeze(0), (first_hidden, ccell))
 
-            output0 = torch.argmax(F.softmax(self.fc_out(output0).squeeze(), dim=0)).item()
+            output0_score = self.fc_out(output0)
+            decoded_score.append(output0_score.squeeze())
+
+            output0 = torch.argmax(F.softmax(output0_score.squeeze(), dim=0)).item()
             decoded.append(output0)
 
             output = output0
 
-            while (len(decoded)<20):
+            while (len(decoded)<max_length):
 
                 outputx = embedding(torch.LongTensor([output]).to(self.device))
                 if self.rnngate=="gru":
@@ -178,11 +195,17 @@ class RNNDecoder(nn.Module):
                 else:
                     output, (hidden, cell) = self.nn(outputx.unsqueeze(0), (hidden, cell))
 
-                output = torch.argmax(F.softmax(self.fc_out(output).squeeze(), dim=0)).item()
+                output_score = self.fc_out(output)
+                decoded_score.append(output_score.squeeze())
+
+                output = torch.argmax(F.softmax(output_score.squeeze(), dim=0)).item()
                 decoded.append(output)
 
             all_decoded.append(decoded)
-        return all_decoded
+            all_decoded_score.append(torch.stack(decoded_score))
+        return all_decoded, torch.stack(all_decoded_score)
+
+
 
             
 

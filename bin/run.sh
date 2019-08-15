@@ -19,21 +19,23 @@ F=(
 # just use the bigger one, no harm
 ["TRAIN_FN"]=data/ptb.train.txt
 ["VALID_FN"]=data/ptb.valid.txt
+["TEST_FN"]=data/ptb.test.txt
 )
 
 M=(
 ["CUDA"]=$CUDA
 ["NUM_EPOCHS"]=500
-["NWORDS"]=10000
+["NWORDS"]=20000
 ["L_EPOCH"]=0
 ["RNNGATE"]=lstm
 ["FRAMEWORK"]=vae
-["HIDDEN_DIM"]=200
+["HIDDEN_DIM"]=190
 ["LATENT_DIM"]=12
-["EMBEDDING_DIM"]=300
+["EMBEDDING_DIM"]=350
 ["BATCH_SIZE"]=128
 ["N_LAYERS"]=1
 ["DELTA_WEIGHT"]=False
+["MAX_SEQ_LEN"]=50
 )
 
 Z=(
