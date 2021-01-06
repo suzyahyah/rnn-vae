@@ -40,10 +40,10 @@ M=(
 
 Z=(
 ["UNIVERSAL_EMBED"]=False
-["SCALE_PZVAR"]=$1
-["KL_ANNEAL_STEPS"]=$2
-["WORD_DROPOUT"]=$3
-["BOW"]=$4
+["SCALE_PZVAR"]=1
+["KL_ANNEAL_STEPS"]=2500
+["WORD_DROPOUT"]=0.4
+["BOW"]=True
 )
 
 echo "CUDA device:", ${M[CUDA]}
@@ -72,4 +72,5 @@ do
   echo "| $var:${Z[$var]}"
 done
 
+echo $PY
 eval $PY

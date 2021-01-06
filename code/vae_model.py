@@ -59,12 +59,10 @@ class RNNVAE(nn.Module):
         q_logvar = q_logvar.squeeze()
 
         for i in range(y.size(0)):
-            ce_loss = F.cross_entropy(x_recon[i], y[i], reduction="sum", ignore_index=0)
-            ce_loss = ce_loss/y_lens[i] # per word
+            ce_loss = F.cross_entropy(x_recon[i], y[i], reduction="mean", ignore_index=0)
             batch_ce_loss += ce_loss
 
         batch_ce_loss = batch_ce_loss/y.size(0)
-        # check this?
         scale = 1/self.scale_pzvar
         kld = -0.5 * torch.sum(1 + q_logvar - q_mu.pow(2) - q_logvar.exp())
         kld = kld/y.size(0)
